@@ -1,0 +1,84 @@
+name: Publish nuget
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+
+  build:
+    name: Build and test solution
+    env:
+      BUILD_CONFIG: 'Release'
+      SOLUTION: './src/MoonlyBird.Common.sln'
+      CACHE_NAME: package-nuget
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.SOLUTION }}
+      - name: Build
+        run: dotnet build ${{ env.SOLUTION }} --nologo --configuration ${{ env.BUILD_CONFIG }} --no-restore /property:Version=${{ github.ref_name }}
+      - name: Test
+        run: dotnet test ${{ env.SOLUTION}} /p:Configuration=$BUILD_CONFIG --no-restore --no-build --verbosity normal
+      
+      - name: Save cache of build
+        uses: actions/cache@v3
+        with:
+          path: ./src/MoonlyBird.Common/bin/Release
+          key: ${{ runner.os }}-build-${{ env.CACHE_NAME }}-${{ hashFiles('./src/MoonlyBird.Common/bin/Release/') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.CACHE_NAME }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+
+  release:
+    env:
+      CACHE_NAME: package-nuget
+    name: Create release
+    runs-on: ubuntu-22.04
+    needs: [ build ]
+    steps:
+      - name: Restore cache of build
+        uses: actions/cache@v3
+        with:
+          path: ./src/MoonlyBird.Common/bin/Release
+          key: ${{ runner.os }}-build-${{ env.CACHE_NAME }}-${{ hashFiles('./src/MoonlyBird.Common/bin/Release/') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.CACHE_NAME }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-              
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./src/MoonlyBird.Common/bin/Release/MoonlyBird.Common.${{ github.ref_name }}.nupkg
+
+  publish:
+    environment: 'nuget-registry'
+    env:
+      CACHE_NAME: package-nuget
+    name: publish nuget package
+    runs-on: ubuntu-22.04
+    needs: [ build ]
+    steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore cache of build
+        uses: actions/cache@v3
+        with:
+          path: ./src/MoonlyBird.Common/bin/Release
+          key: ${{ runner.os }}-build-${{ env.CACHE_NAME }}-${{ hashFiles('./src/MoonlyBird.Common/bin/Release/') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.CACHE_NAME }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-    
+      - name: Publish on nuget.org
+        run: dotnet nuget push ./src/MoonlyBird.Common/bin/Release/MoonlyBird.Common.${{ github.ref_name }}.nupkg --api-key ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json
+        
